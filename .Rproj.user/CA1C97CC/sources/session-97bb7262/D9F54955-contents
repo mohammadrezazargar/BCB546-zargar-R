@@ -1,0 +1,250 @@
+---
+title: "R-assignment"
+output: html_document
+date: "2025-03-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load required packages
+library(dplyr)
+
+
+# Load data
+
+genotypes <- read.table("fang_et_al_genotypes.txt", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+snp_positions <- read.table("snp_position.txt", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+
+# File size (in bytes)
+file.info("fang_et_al_genotypes.txt")$size
+file.info("snp_position.txt")$size
+
+# Basic structure of the data
+str(genotypes)
+str(snp_positions)
+
+# Dimensions of the datasets
+dim(genotypes)  # Number of rows and columns
+dim(snp_positions)
+
+# Column names
+colnames(genotypes)
+colnames(snp_positions)
+
+# First and last few rows
+head(genotypes, 10)
+tail(genotypes, 10)
+
+head(snp_positions, 10)
+tail(snp_positions, 10)
+
+# Count number of missing values
+sum(is.na(genotypes))
+sum(is.na(snp_positions))
+
+# Count unique SNPs
+length(unique(genotypes[, 1]))  # Assuming first column is SNP_ID
+length(unique(snp_positions[, 1]))
+
+# Count number of unique chromosomes in SNP position data
+unique(snp_positions$Chromosome)
+
+# Count occurrences of missing data (similar to grep for NA in Unix)
+sum(genotypes == "NA" | genotypes == "." | genotypes == "?")
+sum(snp_positions == "NA" | snp_positions == "." | snp_positions == "?")
+
+# Count unique values in each column
+sapply(genotypes, function(x) length(unique(x)))
+sapply(snp_positions, function(x) length(unique(x)))
+
+library(dplyr)
+library(tidyr)
+
+# Extract maize (ZMMIL, ZMMLR, ZMMMR)
+maize_data <- genotypes %>%
+  filter(Group %in% c("ZMMIL", "ZMMLR", "ZMMMR"))
+
+# Extract teosinte (ZMPBA, ZMPIL, ZMPJA)
+teosinte_data <- genotypes %>%
+  filter(Group %in% c("ZMPBA", "ZMPIL", "ZMPJA"))
+
+# Function to transpose and format genotype data
+transpose_genotype <- function(data) {
+  t_data <- as.data.frame(t(data[-c(1:3)])) # Transpose, removing first 3 columns (Sample_ID, JG_OTU, Group)
+  colnames(t_data) <- data$Sample_ID # Assign sample names as column names
+  t_data <- cbind(SNP_ID = rownames(t_data), t_data) # Add SNP_ID column
+  rownames(t_data) <- NULL
+  return(t_data)
+}
+
+# Transpose maize and teosinte datasets
+maize_transposed <- transpose_genotype(maize_data)
+teosinte_transposed <- transpose_genotype(teosinte_data)
+
+# Select relevant columns: SNP_ID, Chromosome, Position
+snp_positions_clean <- snp_positions %>%
+  select(SNP_ID, Chromosome, Position) %>%
+  arrange(SNP_ID)
+
+# Join maize SNP positions
+maize_joined <- merge(snp_positions_clean, maize_transposed, by = "SNP_ID", all.x = TRUE)
+
+# Join teosinte SNP positions
+teosinte_joined <- merge(snp_positions_clean, teosinte_transposed, by = "SNP_ID", all.x = TRUE)
+
+# Replace missing values with '?'
+maize_joined[is.na(maize_joined)] <- "?"
+teosinte_joined[is.na(teosinte_joined)] <- "?"
+
+# Sorting in increasing order (by Chromosome, Position)
+maize_sorted_inc <- maize_joined %>%
+  arrange(as.numeric(Chromosome), as.numeric(Position))
+
+teosinte_sorted_inc <- teosinte_joined %>%
+  arrange(as.numeric(Chromosome), as.numeric(Position))
+
+# Sorting in decreasing order (by Chromosome, Position)
+maize_sorted_desc <- maize_joined %>%
+  arrange(desc(as.numeric(Chromosome)), desc(as.numeric(Position)))
+
+teosinte_sorted_desc <- teosinte_joined %>%
+  arrange(desc(as.numeric(Chromosome)), desc(as.numeric(Position)))
+
+# Replace '?' with '-' for decreasing order
+maize_sorted_desc[maize_sorted_desc == "?"] <- "-"
+teosinte_sorted_desc[teosinte_sorted_desc == "?"] <- "-"
+
+# Function to save files by chromosome
+save_chromosome_files <- function(data, folder, missing_symbol) {
+  # Ensure parent directory exists
+  dir.create(folder, recursive = TRUE, showWarnings = FALSE)
+  
+  for (chr in unique(data$Chromosome)) {
+    if (chr %in% c("unknown", "multiple")) next  # Skip unknown/multiple
+    
+    # Construct the file name
+    file_name <- paste0(folder, "/chr", chr, "_", missing_symbol, ".txt")
+    
+    # Write to file
+    write.table(data %>% filter(Chromosome == chr), file = file_name, sep = "\t", row.names = FALSE, quote = FALSE)
+  }
+}
+
+# Save files for maize
+save_chromosome_files(maize_sorted_inc, "Maize/increasing", "?")
+save_chromosome_files(maize_sorted_desc, "Maize/decreasing", "-")
+
+# Save files for teosinte
+save_chromosome_files(teosinte_sorted_inc, "Teosinte/increasing", "?")
+save_chromosome_files(teosinte_sorted_desc, "Teosinte/decreasing", "-")
+
+#visualization
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Ensure "plots" directory exists
+if (!dir.exists("plots")) {
+  dir.create("plots")
+}
+
+# Function to classify SNPs as homozygous, heterozygous, or missing
+classify_snp <- function(x) {
+  if (x %in% c("A/A", "C/C", "G/G", "T/T")) {
+    return("Homozygous")
+  } else if (x %in% c("A/T", "C/G", "G/T", "A/C", "A/G", "C/T")) {
+    return("Heterozygous")
+  } else {
+    return("Missing")
+  }
+}
+
+# Apply classification to maize dataset
+maize_long <- maize_sorted_inc %>%
+  pivot_longer(cols = -c(SNP_ID, Chromosome, Position), names_to = "Sample", values_to = "Genotype") %>%
+  left_join(select(genotypes, Sample_ID, Group), by = c("Sample" = "Sample_ID")) %>%
+  mutate(Classification = sapply(Genotype, classify_snp)) %>%
+  group_by(Group, Classification) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Apply classification to teosinte dataset
+teosinte_long <- teosinte_sorted_inc %>%
+  pivot_longer(cols = -c(SNP_ID, Chromosome, Position), names_to = "Sample", values_to = "Genotype") %>%
+  left_join(select(genotypes, Sample_ID, Group), by = c("Sample" = "Sample_ID")) %>%
+  mutate(Classification = sapply(Genotype, classify_snp)) %>%
+  group_by(Group, Classification) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Combine both datasets
+classification_data <- bind_rows(maize_long, teosinte_long)
+
+# Plot SNP classification (homozygous, heterozygous, missing) per group
+snp_classification_plot <- ggplot(classification_data, aes(x = Group, y = Count, fill = Classification)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Group", y = "Number of SNPs", fill = "SNP Type", title = "SNP Classification Across Groups") +
+  scale_fill_manual(values = c("Homozygous" = "cyan", "Heterozygous" = "salmon", "Missing" = "gray")) +
+  theme_minimal()
+
+# Save SNP classification plot
+ggsave("plots/SNP_classification.png", plot = snp_classification_plot, width = 8, height = 5, dpi = 300)
+
+# Display the plot
+print(snp_classification_plot)
+
+# Create SNP classification across samples
+snp_sample_data <- maize_sorted_inc %>%
+  pivot_longer(cols = -c(SNP_ID, Chromosome, Position), names_to = "Sample", values_to = "Genotype") %>%
+  mutate(Classification = sapply(Genotype, classify_snp)) %>%
+  group_by(Sample, Classification) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Plot SNP classification per sample
+snp_sample_plot <- ggplot(snp_sample_data, aes(x = Sample, y = Count, fill = Classification)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Sample", y = "Proportion of SNPs", fill = "SNP Type", title = "SNP Classification Across Samples") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+# Save SNP classification per sample plot
+ggsave("plots/SNP_sample_classification.png", plot = snp_sample_plot, width = 8, height = 5, dpi = 300)
+
+# Display the plot
+print(snp_sample_plot)
+
+# Custom Visualization: SNP Density Across Chromosomes
+chromosome_lengths <- data.frame(
+  Chromosome = as.character(1:10),
+  Length_bp = c(301000000, 237000000, 232000000, 241000000, 217000000,
+                169000000, 176000000, 175000000, 156000000, 150000000)
+)
+
+# Compute SNP density for maize and teosinte
+maize_snp_density <- maize_snp_count %>%
+  inner_join(chromosome_lengths, by = "Chromosome") %>%
+  mutate(SNP_Density = SNP_Count / Length_bp, Group = "Maize")
+
+teosinte_snp_density <- teosinte_snp_count %>%
+  inner_join(chromosome_lengths, by = "Chromosome") %>%
+  mutate(SNP_Density = SNP_Count / Length_bp, Group = "Teosinte")
+
+# Combine datasets
+snp_density_data <- bind_rows(maize_snp_density, teosinte_snp_density)
+
+# Ensure Chromosome order (1-10)
+snp_density_data$Chromosome <- factor(snp_density_data$Chromosome, levels = as.character(1:10))
+
+# Create SNP density plot
+snp_density_plot <- ggplot(snp_density_data, aes(x = Chromosome, y = SNP_Density, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Chromosome", y = "SNP Density (SNPs per bp)", fill = "Group", title = "SNP Density Across Chromosomes") +
+  scale_fill_manual(values = c("Maize" = "purple", "Teosinte" = "green")) +
+  theme_minimal()
+
+# Save the plot
+ggsave("plots/SNP_density.png", plot = snp_density_plot, width = 8, height = 5, dpi = 300)
+
+# Display the plot
+print(snp_density_plot)
+
+```
