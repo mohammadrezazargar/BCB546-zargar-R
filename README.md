@@ -1,6 +1,6 @@
 # BCB546-zargar-R
 
-the Rmarkdownfile is availble in zargar.Rmd<br> 
+the Rmarkdownfile is availble in zargar2.Rmd<br> 
 
 all 40 generated files are in Maize and Teosinte folders<br> 
 all plots are in Plots folder.<br> 
