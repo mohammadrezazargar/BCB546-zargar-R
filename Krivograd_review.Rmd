@@ -1,0 +1,8 @@
+#General Comments
+I had no issues running the code. I like how you have your data sorted. It is very easy to observe increasing chromosome order vs decreasing. Also, your inspection of files is very thorough Good job!
+
+#Code
+The code ran well overall and it is consise and organized by comments. The usage of sapply works very well to keep the code concise. 
+
+#Plots
+The plots are very clear. The text/captions are organized well and I see no issues. 
